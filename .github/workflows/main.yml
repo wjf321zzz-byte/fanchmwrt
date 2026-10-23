@@ -33,7 +33,20 @@ jobs:
           sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install -y \
-            ack antlr3 asciidoc autoconf automake autopo
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
+            gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
+            libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+            libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+            libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
+            pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
+            rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
+            vim wget xmlto xxd zlib1g-dev
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ"
+
+      - name: 3. 克隆 FanchmWrt 源码并注入第三方插件 Feeds
         run: |
           git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
           cd openwrt
@@ -151,3 +164,50 @@ jobs:
             openwrt/bin/targets/qualcommax/ipq60xx/*re-ss-01*
             openwrt/.config
           if-no-files-found: error
+
+
+四、 方案 B：本地 Ubuntu 22.04 编译一键脚本
+
+如果你有一台联网的 Ubuntu 22.04 主机或 WSL2 环境（需预留约 50GB 磁盘空间，切勿使用 root 用户直接执行 make），可以按顺序运行以下命令：
+
+# 1. 安装编译环境依赖
+sudo apt update && sudo apt install -y \
+  ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+  bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
+  gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
+  libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+  libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+  libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
+  pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
+  rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
+  vim wget xmlto xxd zlib1g-dev
+
+# 2. 克隆 FanchmWrt 主线分支 (支持 JDCloud RE-SS-01)
+git clone --depth 1 -b openwrt-main https://github.com/fanchmwrt/fanchmwrt.git
+cd fanchmwrt
+
+# 3. 追加 PassWall / PassWall2 / OpenClash 插件源
+cat << 'EOF' >> feeds.conf.default
+src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main
+src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main
+src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main
+src-git openclash https://github.com/vernesong/OpenClash.git;master
+EOF
+
+# 4. 更新并安装 Feeds（优先应用 passwall_packages 中的新版本依赖包）
+./scripts/feeds update -a
+./scripts/feeds install -a -f -p passwall_packages
+./scripts/feeds install -a -f -p passwall
+./scripts/feeds install -a -f -p passwall2
+./scripts/feeds install -a -f -p openclash
+./scripts/feeds install -a
+
+# 5. 将本文第二节中的《种子配置文件》内容写入 .config，然后补全依赖
+make defconfig
+
+# （可选）打开菜单界面微调其他插件
+# make menuconfig
+
+# 6. 预下载源码包并开始编译
+make download -j8 V=s
+make -j$(nproc) || make -j1 V=s
