@@ -1,16 +1,15 @@
 name: Build FanchmWrt for JDCloud RE-SS-01
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       enable_docker:
         description: '是否编译 Docker (true/false)'
-        required: true
-        default: 'true'
-      ssh_debug:
-        description: 'SSH 远程调试 (true/false)'
         required: false
-        default: 'false'
+        default: 'true'
 
 env:
   REPO_URL: https://github.com/fanchmwrt/fanchmwrt
@@ -51,7 +50,6 @@ jobs:
           git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
           cd openwrt
 
-          # 注入 PassWall、PassWall2 及 OpenClash 官方软件源
           cat << 'EOF' >> feeds.conf.default
           src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main
           src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main
@@ -60,7 +58,6 @@ jobs:
           EOF
 
           ./scripts/feeds update -a
-          # 优先从 passwall_packages 安装最新代理核心组件（sing-box, xray-core 等）
           ./scripts/feeds install -a -f -p passwall_packages
           ./scripts/feeds install -a -f -p passwall
           ./scripts/feeds install -a -f -p passwall2
@@ -76,7 +73,6 @@ jobs:
           CONFIG_TARGET_qualcommax_ipq60xx=y
           CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y
 
-          # USB 网络共享与驱动
           CONFIG_PACKAGE_kmod-usb-core=y
           CONFIG_PACKAGE_kmod-usb3=y
           CONFIG_PACKAGE_kmod-usb-net=y
@@ -86,7 +82,6 @@ jobs:
           CONFIG_PACKAGE_kmod-usb-net-rndis=y
           CONFIG_PACKAGE_usb-modeswitch=y
 
-          # PassWall & PassWall2 & OpenClash
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Haproxy=y
@@ -101,7 +96,6 @@ jobs:
           CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Xray=y
           CONFIG_PACKAGE_luci-app-openclash=y
 
-          # 底层网络依赖 (nftables / TPROXY / TUN)
           CONFIG_PACKAGE_dnsmasq-full=y
           CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y
           CONFIG_PACKAGE_dnsmasq_full_nftset=y
@@ -115,15 +109,11 @@ jobs:
           CONFIG_PACKAGE_curl=y
           CONFIG_PACKAGE_ca-bundle=y
 
-          # eMMC 磁盘工具
           CONFIG_PACKAGE_block-mount=y
           CONFIG_PACKAGE_cfdisk=y
           CONFIG_PACKAGE_e2fsprogs=y
           CONFIG_PACKAGE_lsblk=y
-          EOF
 
-          if [ "${{ github.event.inputs.enable_docker }}" = "true" ]; then
-            cat << 'EOF' >> .config
           CONFIG_KERNEL_CGROUPS=y
           CONFIG_KERNEL_NAMESPACES=y
           CONFIG_KERNEL_OVERLAY_FS=y
@@ -134,12 +124,10 @@ jobs:
           CONFIG_PACKAGE_luci-i18n-dockerman-zh-cn=y
           CONFIG_PACKAGE_cgroupfs-mount=y
           EOF
-          fi
 
-          # 预置 OpenClash Meta (Mihomo) arm64 内核，免去刷机后首次启动下载失败烦恼
           mkdir -p files/etc/openclash/core
-          curl -sL https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz | tar xOvz > files/etc/openclash/core/clash_meta
-          chmod +x files/etc/openclash/core/clash_meta
+          curl -sL https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz | tar xOvz > files/etc/openclash/core/clash_meta || true
+          chmod +x files/etc/openclash/core/clash_meta || true
 
           make defconfig
 
@@ -164,50 +152,3 @@ jobs:
             openwrt/bin/targets/qualcommax/ipq60xx/*re-ss-01*
             openwrt/.config
           if-no-files-found: error
-
-
-四、 方案 B：本地 Ubuntu 22.04 编译一键脚本
-
-如果你有一台联网的 Ubuntu 22.04 主机或 WSL2 环境（需预留约 50GB 磁盘空间，切勿使用 root 用户直接执行 make），可以按顺序运行以下命令：
-
-# 1. 安装编译环境依赖
-sudo apt update && sudo apt install -y \
-  ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-  bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
-  gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
-  libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-  libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
-  libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
-  pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
-  rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
-  vim wget xmlto xxd zlib1g-dev
-
-# 2. 克隆 FanchmWrt 主线分支 (支持 JDCloud RE-SS-01)
-git clone --depth 1 -b openwrt-main https://github.com/fanchmwrt/fanchmwrt.git
-cd fanchmwrt
-
-# 3. 追加 PassWall / PassWall2 / OpenClash 插件源
-cat << 'EOF' >> feeds.conf.default
-src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main
-src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main
-src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main
-src-git openclash https://github.com/vernesong/OpenClash.git;master
-EOF
-
-# 4. 更新并安装 Feeds（优先应用 passwall_packages 中的新版本依赖包）
-./scripts/feeds update -a
-./scripts/feeds install -a -f -p passwall_packages
-./scripts/feeds install -a -f -p passwall
-./scripts/feeds install -a -f -p passwall2
-./scripts/feeds install -a -f -p openclash
-./scripts/feeds install -a
-
-# 5. 将本文第二节中的《种子配置文件》内容写入 .config，然后补全依赖
-make defconfig
-
-# （可选）打开菜单界面微调其他插件
-# make menuconfig
-
-# 6. 预下载源码包并开始编译
-make download -j8 V=s
-make -j$(nproc) || make -j1 V=s
